@@ -30,14 +30,27 @@ Manual smoke test in the browser: pick **Computer Science BS** → the Fall 1 pr
 CSCI 111 at 15–20 credits → **Approve** → Spring 1 should suggest CSCI 211/212 (unlocked by CSCI 111). Add a
 course whose prereqs aren't met and confirm it turns red and blocks Approve.
 
-Optional: `set GEMINI_API_KEY=...` (Windows) / `export GEMINI_API_KEY=...` before step 2 for AI-ordered
-semesters and the **Advisor** chatbot (header button; `POST /api/chat`, model `gemini-3.7-flash`, grounded in the approved plan,
-major progress and the eligible list for the next term). Without a key the rule-based picker is used, the response shows
-`"source": "heuristic"`, and the chat replies that the key is missing. Never commit the key.
+Optional: put your Gemini key in `backend/.env` (`GEMINI_API_KEY=...`, gitignored) or export it as an environment
+variable before step 2. With a key, `gemini-3.7-flash` orders each semester (falling back to `gemini-3.6-flash` only when
+3.7 answers 503 "high demand") and the **Advisor** chatbot in the header is on. Without a key the rule-based picker is used,
+the response shows `"source": "heuristic"`, and the chat replies that the key is missing. Never commit the key.
 `test_plan.py` always runs rule-based.
 
 Refresh `sections.json` once a term, when the registrar publishes the next schedule (`sections_meta.json`
 records when it was last scraped, and the UI shows that date rather than implying the seat status is live).
+
+## Advisor chatbot
+
+`POST /api/chat {"program", "terms", "term", "messages": [{"role": "user"|"model", "text"}]}` -> `{"reply", "source", "track"}`.
+The system prompt is rebuilt per request from the approved terms, major progress, Pathways slots and the next term's
+eligible list, so the bot only talks about courses the planner can verify. Ask for the **fastest track** ("fastest way to
+graduate", "full plan", "shortest path", ...) and the server computes a semester-by-semester path with the rule-based picker
+(`fast_track`: continues from the approved terms, or from scratch if none; Fall/Spring alternating; stops when every major
+rule is met, nothing is eligible, or after 12 terms), Gemini presents it verbatim, and the response's `track` field carries
+it as `[{"term", "courses": [ids]}]`. Chat history lives in the browser tab only.
+
+If the chat answers `bad request`, two `server.py` processes are probably bound to :8000 (Windows allows it; the stale one
+answers): `netstat -ano | findstr :8000` and `taskkill /PID <pid> /F` the older one.
 
 ## How a semester is suggested
 

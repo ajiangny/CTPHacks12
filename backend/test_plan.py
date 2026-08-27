@@ -198,3 +198,17 @@ r = s.chat({"program": "CSCI-BS", "terms": [], "term": "Fall", "messages": [{"ro
 assert r["source"] == "none" and "GEMINI_API_KEY" in r["reply"], r
 assert "error" in s.chat({"program": "CSCI-BS", "terms": [], "messages": [{"role": "model", "text": "x"}]})
 print("advisor chat OK")
+
+# fastest track: from nothing -> a multi-term path that finishes the CS major; from approved terms -> continues, no repeats
+track = s.fast_track(s.programs["CSCI-BS"], [], "Fall")
+assert 4 <= len(track) <= s.MAX_TRACK_TERMS and track[0]["term"] == "Fall" and track[1]["term"] == "Spring", [t["term"] for t in track]
+assert s.by_code["CSCI 111"] in track[0]["courses"], "CSCI 111 first"
+flat = [i for t in track for i in t["courses"]]
+assert len(flat) == len(set(flat)), "no course twice"
+assert not s.validate([t["courses"] for t in track]), "every term prereq-valid"
+assert all(m["have"] >= m["need"] for m in s.candidates(s.programs["CSCI-BS"], s.Counter(flat), "Fall")[1]["major"]), "major complete"
+first = [s.by_code["CSCI 111"], s.by_code["ENGL 110"], s.by_code["MATH 151"]]
+cont = s.fast_track(s.programs["CSCI-BS"], [first], "Spring")
+assert cont[0]["term"] == "Spring" and not set(first) & {i for t in cont for i in t["courses"]}, "continues after approved term"
+assert s.FAST_TRACK_RE.search("what's the fastest track to graduate?") and not s.FAST_TRACK_RE.search("what is CSCI 111?")
+print("fastest track OK")

@@ -60,6 +60,10 @@ Exit = same easing, opacity-led, never longer than enter. `prefers-reduced-motio
 - **Availability control**: a `<details>` in the left panel. Two native `<input type="time">` fields (`field`, `w-26`)
   and five day toggles — 28px, `line-strong` border when available, `surface-hover` + `ink-3` + strike-through when
   not. An `on` badge (`tag`) in the summary whenever anything is narrowed, plus a ghost "Clear availability".
+- **Advisor chat** (`Chat.tsx`): 320×420 card anchored bottom-right of the diagram, `canvas` fill, `line` border, `lg` radius,
+  `shadow-1` (the one permitted popover shadow). 36px header with an `ink-3` uppercase "Gemini" eyebrow. Messages are 13px
+  bubbles, `md` radius: student = `accent` fill + white text, right-aligned at ≤85%; advisor = `surface` fill. Input is a `field`,
+  Send is a `primary` button. Enters with a 12px upward slide + fade on `T.base`; "Thinking…" in `ink-3` while waiting.
 
 ## Layout
-`header (44px)` / `[left 320px | diagram flex-1 | right 320px]`. Left = approval, right = requirements + Pathways. Panels toggle with header buttons, `Ctrl/⌘+[` and `Ctrl/⌘+]`; state persisted in `localStorage` (`ui:left`, `ui:right`).
+`header (44px)` / `[left 320px | diagram flex-1 | right 320px]`; the Advisor chat floats over the diagram's bottom-right corner (toggled by the header **Advisor** button). Left = approval, right = requirements + Pathways. Panels toggle with header buttons, `Ctrl/⌘+[` and `Ctrl/⌘+]`; state persisted in `localStorage` (`ui:left`, `ui:right`).
