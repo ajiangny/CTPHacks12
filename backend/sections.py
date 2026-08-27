@@ -14,12 +14,15 @@ globalsearch.cuny.edu is a three-step JSP wizard, no login and no CSRF token:
   2. POST inst_selection=QNS01 & term_value=<id>      -> the criteria form
   3. POST subject_name=<subj> & the criteria fields   -> the result table
 
-Two traps, both found the hard way:
+Three traps, found the hard way:
   * The meeting-time operator fields are REQUIRED (omitting them 500s) but an operator with empty text
     matches nothing. GE 12:00am / LE 11:59pm is the "no filter" spelling.
   * The search FILTER uses CUNYfirst subject codes (CMSC, UBST) while the catalog uses its own
     (CSCI, URBST). The codes *rendered in the results* are the catalog's, so we join on those and never
     need a crosswalk -- we just iterate every subject the form offers and read back whatever it returns.
+  * The status icon's accessibility `alt` text is misleading: even status_waiting.gif can say
+    alt="Open". The actual state is in `title` (Open / Closed / Wait), with the icon filename as a
+    fallback. Never infer registration status from `alt`.
 
 Stdlib only.
 """
@@ -44,6 +47,13 @@ HEADING = re.compile(r"<span>&nbsp;<a id='imageDivLink\d+'.*?</a>&nbsp;(.*?)</sp
 CELL = re.compile(r'<td[^>]*data-label="([^"]*)"[^>]*>(.*?)</td>', re.S)
 TIME = re.compile(r"([A-Za-z]{2,10}?)\s+(\d{1,2}):(\d{2})([AP]M)\s*-\s*(\d{1,2}):(\d{2})([AP]M)")
 COUNT = re.compile(r"(\d+) class section\(s\) found")
+STATUS_NAMES = {
+    "open": "Open",
+    "closed": "Closed",
+    "wait": "Wait List",
+    "waiting": "Wait List",
+    "wait list": "Wait List",
+}
 
 
 def text(s):
@@ -70,6 +80,27 @@ def parse_meetings(cell):
         if d:
             out.append((d, minutes(h1, m1, ap1), minutes(h2, m2, ap2)))
     return out
+
+
+def parse_status(cell):
+    """Return Open / Closed / Wait List from a Global Search Status cell.
+
+    Do NOT trust the image's ``alt`` attribute. CUNY currently renders waitlisted rows like:
+        <img src="images/status_waiting.gif" alt="Open" title="Wait">
+    so reading ``alt`` silently turns every waitlisted section into Open. The title is the semantic
+    state used by the page; the icon filename is a defensive fallback. Unknown markup stays unknown.
+    """
+    cell = cell or ""
+    title = re.search(r"\btitle\s*=\s*['\"]([^'\"]+)['\"]", cell, re.I)
+    if title:
+        value = html.unescape(title.group(1)).strip().lower()
+        if value in STATUS_NAMES:
+            return STATUS_NAMES[value]
+
+    icon = re.search(r"status_(open|closed|waiting)\.gif", cell, re.I)
+    if icon:
+        return STATUS_NAMES[icon.group(1).lower()]
+    return ""
 
 
 class Search:
@@ -144,7 +175,6 @@ def parse(page):
         row = []
         raw = text(cells.get("DaysAndTimes", ""))
         meetings = parse_meetings(raw)
-        status = re.search(r'alt="([^"]*)"', cells.get("Status", ""))
         sec = text(cells.get("Section", ""))
         out.setdefault(code, []).append({
             "sec": sec.split("-")[0].strip(),
@@ -156,7 +186,7 @@ def parse(page):
             "room": text(cells.get("Room", "")),
             "instr": text(cells.get("Instructor", "")),
             "mode": text(cells.get("Instruction Mode", "")),
-            "status": status.group(1) if status else "",   # Open / Closed / Wait List
+            "status": parse_status(cells.get("Status", "")),
             "raw": "" if meetings else raw,                # keep "TBA" etc. so the UI can say so
         })
     return out
@@ -193,6 +223,16 @@ def scrape_term(term, name, only=None, verbose=True):
     return found, total
 
 
+def status_counts(hit):
+    """Small scrape-health signal stored in metadata; makes an all-Open parser regression obvious."""
+    out = {"Open": 0, "Closed": 0, "Wait List": 0, "Unknown": 0}
+    for secs in hit.values():
+        for sec in secs:
+            status = sec.get("status") or "Unknown"
+            out[status if status in out else "Unknown"] += 1
+    return out
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--term", action="append", help="term id (default: all)")
@@ -209,11 +249,14 @@ if __name__ == "__main__":
         found, total = scrape_term(term, TERMS[term], a.subject)
         hit = {by_code[k]: v for k, v in found.items() if k in by_code}
         missed = sorted(k for k in found if k not in by_code)
+        counts = status_counts(hit)
         out[term] = hit
         meta[term] = {"name": TERMS[term], "courses": len(hit), "sections": total,
-                      "unmatched_codes": len(missed)}
+                      "unmatched_codes": len(missed), "statuses": counts}
         print(f"  -> {len(found)} distinct courses, {total} sections; "
               f"{len(hit)} matched a catalog course, {len(missed)} codes unmatched {missed[:8]}")
+        print(f"     status: Open {counts['Open']}, Closed {counts['Closed']}, "
+              f"Wait List {counts['Wait List']}, Unknown {counts['Unknown']}")
 
     if a.dry:
         for term, hit in out.items():
@@ -228,7 +271,7 @@ if __name__ == "__main__":
 
     (OUT / "sections.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf8")
     (OUT / "sections_meta.json").write_text(json.dumps(
-        {"scraped": time.strftime("%Y-%m-%d"), "source": BASE, "season": SEASON, "terms": meta},
+        {"scraped": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "source": BASE, "season": SEASON, "terms": meta},
         ensure_ascii=False, indent=1), encoding="utf8")
     covered = {cid for hit in out.values() for cid in hit}
     print(f"\nwrote {len(covered)} of {len(courses)} catalog courses with a real section -> {OUT / 'sections.json'}")
