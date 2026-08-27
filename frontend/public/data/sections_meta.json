@@ -1,5 +1,5 @@
 {
- "scraped": "2026-08-27",
+ "scraped": "2026-08-27T19:46:29+0000",
  "source": "https://globalsearch.cuny.edu/CFGlobalSearchTool",
  "season": {
   "Fall": [
@@ -16,21 +16,39 @@
  "terms": {
   "1269": {
    "name": "2026 Fall Term",
-   "courses": 797,
-   "sections": 1907,
-   "unmatched_codes": 29
+   "courses": 798,
+   "sections": 1909,
+   "unmatched_codes": 29,
+   "statuses": {
+    "Open": 712,
+    "Closed": 21,
+    "Wait List": 1117,
+    "Unknown": 0
+   }
   },
   "1266": {
    "name": "2026 Summer Term",
    "courses": 174,
    "sections": 267,
-   "unmatched_codes": 3
+   "unmatched_codes": 3,
+   "statuses": {
+    "Open": 200,
+    "Closed": 64,
+    "Wait List": 0,
+    "Unknown": 0
+   }
   },
   "1262": {
    "name": "2026 Spring Term",
    "courses": 823,
    "sections": 1939,
-   "unmatched_codes": 16
+   "unmatched_codes": 16,
+   "statuses": {
+    "Open": 880,
+    "Closed": 1035,
+    "Wait List": 0,
+    "Unknown": 0
+   }
   }
  }
 }
