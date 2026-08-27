@@ -68,7 +68,7 @@ export default function App() {
   const [preferences, setPreferences] = useState<SubjectPreferences>(() => store<SubjectPreferences>('preferences') ?? NO_PREFERENCES);
   const [terms, setTerms] = useState<Term[]>(() => store<Term[]>(`terms:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [proposal, setProposal] = useState<Suggestion[]>([]);
-  // pins: courses locked into the current proposal (survive Regenerate). queue: wanted later — promoted to a pin the first term they're eligible.
+  // pins: courses locked into the current proposal (survive Generate with Gemini). queue: wanted later — promoted to a pin the first term they're eligible.
   const [pins, setPins] = useState<string[]>(() => store(`pins:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [queue, setQueue] = useState<string[]>(() => store(`queue:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [auditRequirements, setAuditRequirements] = useState<AuditRequirement[]>(() => store(`auditReqs:${store('program') ?? 'CSCI-BS'}`) ?? []);
@@ -196,16 +196,18 @@ export default function App() {
     return r.suggested;
   };
 
-  // ask the backend for the next semester whenever the approved terms change (pins/queue ride along; `fresh` only on Regenerate)
+  // ask the backend for the next semester whenever the approved terms change (pins/queue ride along). The automatic request is
+  // rule-based (ai: false, instant, no Gemini credits); only "Generate with Gemini" sends ai + fresh (bypasses the server cache).
   const fresh = useRef(false);
+  const ai = useRef(false);
   useEffect(() => {
     if (!program || done) return;
     const ctl = new AbortController();
     const { pins, queue } = latest.current;
     const hasPreferences = preferences.preferredSubjects.length > 0 || preferences.avoidedSubjects.length > 0;
     const body = { program: pid, terms: terms.map(t => t.courses), term: current.kind, pins, queue, auditRequirements,
-                   fresh: fresh.current, avail: availNarrowed ? avail : null, preferences: hasPreferences ? preferences : undefined };
-    fresh.current = false;
+                   fresh: fresh.current, ai: ai.current, avail: availNarrowed ? avail : null, preferences: hasPreferences ? preferences : undefined };
+    fresh.current = false; ai.current = false;
     setLoading(true); setError('');
     fetch('/api/suggest', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal })
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() as Promise<SuggestResponse>; })
@@ -219,7 +221,7 @@ export default function App() {
   const approve = () => { if (blocked.length) return; const t = [...terms, { ...current, courses: proposal.map(p => p.id) }]; setTerms(t); store(`terms:${pid}`, t); setPins([]); };
   const reset = () => { setTerms([]); store(`terms:${pid}`, []); setResp(null); setPins([]); setQueue([]); setIgnored([]); setAuditRequirements([]); store(`auditReqs:${pid}`, []); };
   const undo = () => { const t = terms.slice(0, -1); setTerms(t); store(`terms:${pid}`, t); setPins([]); };
-  const regenerate = () => { fresh.current = true; setTerms([...terms]); };   // re-triggers the effect, bypassing the server cache; pins survive
+  const generate = () => { fresh.current = true; ai.current = true; setTerms([...terms]); };   // re-triggers the effect with Gemini, bypassing the server cache; pins survive
   const remove = (id: string) => { setProposal(proposal.filter(p => p.id !== id)); setPins(pins.filter(p => p !== id)); };
   const togglePin = (id: string) => setPins(pins.includes(id) ? pins.filter(p => p !== id) : [...pins, id]);
   const eligibleNow = (id: string) => resp?.candidates.find(c => c.id === id);
@@ -231,7 +233,7 @@ export default function App() {
     else if (!queue.includes(id)) setQueue([...queue, id]);
   };
   const unqueue = (id: string) => setQueue(queue.filter(q => q !== id));
-  /** Ghosts are unlocked by `src` in the proposed term: pin `src` (so Regenerate keeps the prerequisite) and queue the ghost for the next eligible term. */
+  /** Ghosts are unlocked by `src` in the proposed term: pin `src` (so Generate with Gemini keeps the prerequisite) and queue the ghost for the next eligible term. */
   const enqueue = (id: string, src: string) => {
     if (!pins.includes(src)) setPins([...pins, src]);
     if (!taken.includes(id) && !queue.includes(id)) setQueue([...queue, id]);
@@ -558,7 +560,8 @@ export default function App() {
                     <div className="flex flex-wrap gap-1">
                       <button className={primary} onClick={approve} disabled={loading || !proposal.length || blocked.length > 0}
                         title={blocked.length ? `${blocked.map(p => courses.get(p.id)?.code).join(', ')} missing prerequisites` : undefined}>Approve {current.name}</button>
-                      <button className={btn} onClick={regenerate} disabled={loading} title={pins.length ? `Keeps ${pins.length} pinned` : undefined}>Regenerate</button>
+                      <button className={btn} onClick={generate} disabled={loading} title={`Ask Gemini to order this term (uses API credits)${pins.length ? `; keeps ${pins.length} pinned` : ''}`}>
+                        {resp.source === 'gemini' ? 'Regenerate with Gemini' : 'Generate with Gemini'}</button>
                       <button className={btn} onClick={undo} disabled={!terms.length}>Undo</button>
                     </div>
                     <AnimatePresence>{loading && <motion.p key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={T.fast} className="mt-2 text-[12px] text-ink-3">Thinking…</motion.p>}</AnimatePresence>

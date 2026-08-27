@@ -31,8 +31,9 @@ CSCI 111 at 15–20 credits → **Approve** → Spring 1 should suggest CSCI 211
 course whose prereqs aren't met and confirm it turns red and blocks Approve.
 
 Optional: put your Gemini key in `backend/.env` (`GEMINI_API_KEY=...`, gitignored) or export it as an environment
-variable before step 2. With a key, `gemini-3.7-flash` orders each semester (falling back to `gemini-3.6-flash` only when
-3.7 answers 503 "high demand") and the **Advisor** chatbot in the header is on. Without a key the rule-based picker is used,
+variable before step 2. With a key, the **Generate with Gemini** button asks `gemini-3.7-flash` to order the term (falling back
+to `gemini-3.6-flash` only when 3.7 answers 503 "high demand") and the **Advisor** chatbot in the header is on. Approving a term
+loads the next one with the rule-based picker only (instant, no credits); Gemini is spent only when you press the button. Without a key the rule-based picker is used,
 the response shows `"source": "heuristic"`, and the chat replies that the key is missing. Never commit the key.
 `test_plan.py` always runs rule-based.
 
@@ -63,7 +64,8 @@ answers): `netstat -ano | findstr :8000` and `taskkill /PID <pid> /F` the older 
    orders the rest **from that list only** and writes a one-line reason per course; every pick (Gemini's or the
    rule-based picker's) goes through the same guards — ≥5 courses, 15–20 credits, coreq partner present, one course
    per Pathways slot, ≤3 required-core per term — and the rule-based phases top up anything Gemini left short.
-   Responses are cached per (program, approved terms, term, locked courses); **Regenerate** bypasses the cache.
+   Responses are cached per (program, approved terms, term, locked courses, ai); **Generate with Gemini** bypasses the cache.
+   The automatic request after Approve sends `"ai": false` and never calls Gemini.
 4. The student removes/adds courses — any catalog course can be added; a course whose prerequisites aren't met by an
    earlier term turns red (none met) or yellow (some met) and blocks Approve, duplicates warn, and a 200+ course with
    no prerequisite source shows a yellow `!` — then approves; progress toward the major and all Pathways slots updates.
