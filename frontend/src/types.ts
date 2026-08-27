@@ -7,7 +7,7 @@ export type Program = { id: string; name: string; degree: string; description: s
 export type Prereqs = Record<string, string[][]>;
 
 /** transfers: courseId -> school, for credits imported from a DegreeWorks audit that were earned elsewhere */
-export type Term = { name: string; kind: 'Fall' | 'Spring' | 'Summer' | 'Winter'; courses: string[]; transfers?: Record<string, string>; extra?: number };   // extra: credits from audit rows not in our catalog
+export type Term = { name: string; kind: 'Fall' | 'Spring' | 'Summer' | 'Winter'; courses: string[]; transfers?: Record<string, string>; extra?: number; imported?: boolean };   // extra: credits from audit rows not in our catalog; imported: from a DegreeWorks audit (prereqs not checked)
 /** A real CUNYfirst class section. `start`/`end` are minutes past midnight; null for async/TBA. */
 export type Section = {
   sec: string; component: string; days: string; start: number | null; end: number | null;

@@ -71,6 +71,8 @@ export default function App() {
   const [pins, setPins] = useState<string[]>(() => store(`pins:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [queue, setQueue] = useState<string[]>(() => store(`queue:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [auditRequirements, setAuditRequirements] = useState<AuditRequirement[]>(() => store(`auditReqs:${store('program') ?? 'CSCI-BS'}`) ?? []);
+  // ignored: courses whose prerequisite warning the student chose to ignore (the card stops being red, Approve is unblocked)
+  const [ignored, setIgnored] = useState<string[]>(() => store(`ignored:${store('program') ?? 'CSCI-BS'}`) ?? []);
   const [resp, setResp] = useState<SuggestResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -131,10 +133,11 @@ export default function App() {
       setTerms(store<Term[]>(`terms:${pid}`) ?? []);
       setPins(store(`pins:${pid}`) ?? []);
       setQueue(store(`queue:${pid}`) ?? []);
+      setIgnored(store(`ignored:${pid}`) ?? []);
       setAuditRequirements(store<AuditRequirement[]>(`auditReqs:${pid}`) ?? []);
     }
   }, [pid]);
-  useEffect(() => { store(`pins:${pid}`, pins); store(`queue:${pid}`, queue); }, [pid, pins, queue]);
+  useEffect(() => { store(`pins:${pid}`, pins); store(`queue:${pid}`, queue); store(`ignored:${pid}`, ignored); }, [pid, pins, queue, ignored]);
   useEffect(() => { store('ui:left', left); store('ui:right', right); }, [left, right]);
   useEffect(() => {
     if (!notice.startsWith('Imported ')) return;
@@ -179,7 +182,8 @@ export default function App() {
     return met.length === groups.length ? 'ok' : met.length ? 'partial' : 'missing';
   };
   const proposalIds = proposal.map(p => p.id);
-  const blocked = proposal.filter(p => status(p.id, proposalIds) !== 'ok');
+  const blocked = proposal.filter(p => !ignored.includes(p.id) && status(p.id, proposalIds) !== 'ok');
+  const ignore = (id: string) => { if (!ignored.includes(id)) setIgnored([...ignored, id]); };
 
   /** The server locks eligible pins + queued courses into the term first; here we just promote newly-eligible queued ones to pins. */
   const merge = (r: SuggestResponse) => {
@@ -211,7 +215,7 @@ export default function App() {
   useEffect(() => { store('preferences', preferences); }, [preferences]);
 
   const approve = () => { if (blocked.length) return; const t = [...terms, { ...current, courses: proposal.map(p => p.id) }]; setTerms(t); store(`terms:${pid}`, t); setPins([]); };
-  const reset = () => { setTerms([]); store(`terms:${pid}`, []); setResp(null); setPins([]); setQueue([]); setAuditRequirements([]); store(`auditReqs:${pid}`, []); };
+  const reset = () => { setTerms([]); store(`terms:${pid}`, []); setResp(null); setPins([]); setQueue([]); setIgnored([]); setAuditRequirements([]); store(`auditReqs:${pid}`, []); };
   const undo = () => { const t = terms.slice(0, -1); setTerms(t); store(`terms:${pid}`, t); setPins([]); };
   const regenerate = () => { fresh.current = true; setTerms([...terms]); };   // re-triggers the effect, bypassing the server cache; pins survive
   const remove = (id: string) => { setProposal(proposal.filter(p => p.id !== id)); setPins(pins.filter(p => p !== id)); };
@@ -262,8 +266,10 @@ export default function App() {
       const audit = await r.json() as AuditImport;
       if (!r.ok || audit.error) throw new Error(audit.error || `${r.status}`);
       if (!audit.program) throw new Error(`Could not match "${audit.major ?? 'audit major'}" to a planner major.`);
+      audit.terms = audit.terms.map(t => ({ ...t, imported: true }));   // the registrar already accepted these — never flag prereqs
       store('program', audit.program);
       store(`terms:${audit.program}`, audit.terms);
+      store(`ignored:${audit.program}`, []);
       store(`pins:${audit.program}`, []);
       store(`queue:${audit.program}`, []);
       store(`auditReqs:${audit.program}`, audit.completedRequirements ?? []);
@@ -271,6 +277,7 @@ export default function App() {
       setTerms(audit.terms);
       setPins([]);
       setQueue([]);
+      setIgnored([]);
       setAuditRequirements(audit.completedRequirements ?? []);
       setProposal([]);
       setResp(null);
@@ -360,7 +367,9 @@ export default function App() {
   const courseCodes = (ids: string[]) => ids.map(id => courses.get(id)?.code ?? id).join(' or ');
   const auditReqText = (a: AuditRequirement) => courseCodes(a.courses);
   const hot = focus ? new Set([focus, ...(prereqs[focus] ?? []).flat(), ...(resp?.candidates.find(c => c.id === focus)?.unlocks ?? [])]) : null;
-  const violations = new Map((resp?.violations ?? []).map(v => [v.id, v]));
+  // audit-imported terms are the registrar's record, not a plan: never flag their prerequisites. Ignored courses are the student's call.
+  const importedIds = new Set(terms.filter(t => t.imported).flatMap(t => t.courses));
+  const violations = new Map((resp?.violations ?? []).filter(v => !importedIds.has(v.id) && !ignored.includes(v.id)).map(v => [v.id, v]));
   const unverified = new Set([...place.keys()].filter(id => courses.has(id) && !verified(id)));
   const rawWarn = error || notice || (blocked.length ? `Can't approve ${current.name}: ${blocked.map(p => {
     const c = courses.get(p.id), g = (prereqs[p.id] ?? []).filter(g => !g.some(q => taken.includes(q)) && !placement(g));
@@ -663,8 +672,9 @@ export default function App() {
                   const c = courses.get(id); const { x, y } = at(id);
                   const s = proposal.find(p => p.id === id);
                   const v = violations.get(id);
-                  const st = col.proposed ? status(id, proposalIds) : 'ok';       // red: no prereq met; yellow: some met (almost eligible)
-                  const tone = v || st === 'missing' ? 'danger' : st === 'partial' || unverified.has(id) ? 'warning' : null;
+                  const st = col.proposed && !ignored.includes(id) ? status(id, proposalIds) : 'ok';       // red: no prereq met; yellow: some met (almost eligible)
+                  const shrug = ignored.includes(id);
+                  const tone = v || st === 'missing' ? 'danger' : st === 'partial' || (unverified.has(id) && !shrug) ? 'warning' : null;
                   const pinned = col.proposed && pins.includes(id);
                   const dim = !!hot && !hot.has(id);
                   const clickable = !!col.proposed;
@@ -706,7 +716,8 @@ export default function App() {
                       `${c.name}\n${c.credits} cr`,
                       col.proposed ? (pinned ? 'Pinned for this term — click to unpin' : 'Click to pin for this term') : col.queued ? 'Queued — joins the first eligible term' : '',
                       v ? `Needs ${v.missing.map(m => courses.get(m)?.code).join(' or ')} in an earlier term` : '',
-                      st === 'missing' ? 'Prerequisites not met by an earlier term — remove or defer before approving' : st === 'partial' ? 'Almost eligible: some prerequisites are still missing from earlier terms' : '',
+                      st === 'missing' ? 'Prerequisites not met by an earlier term — remove, or ignore (top-left) if you have permission' : st === 'partial' ? 'Almost eligible: some prerequisites are still missing from earlier terms' : '',
+                      ignored.includes(id) ? 'Prerequisite warning ignored' : '',
                       s ? `Why: ${s.reason}` : '',
                       s?.unlocks.length ? `Unlocks: ${s.unlocks.map(u => courses.get(u)?.code).join(', ')}` : '',
                       (prereqs[id] ?? []).length ? `Prereqs: ${prereqs[id].map(g => g.map(q => courses.get(q)?.code).join(' or ')).join(' and ')}${s?.source ? ` (source: ${s.source})` : ''}`
@@ -717,12 +728,14 @@ export default function App() {
                     <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone === 'danger' ? 'bg-danger' : tone === 'warning' ? 'bg-warning' : pinned ? 'bg-accent' : col.proposed || col.queued ? 'bg-line-strong' : 'bg-success'}`} />
                     <div className="min-w-0 flex-1">
                       <b className="flex items-center gap-1.5 text-[13px] font-semibold">{c?.code ?? id}
-                        {unverified.has(id) && <i className="grid h-3.5 w-3.5 place-items-center rounded-full bg-warning text-[9px] font-bold not-italic text-white" title="No prerequisite data found — confirm with an advisor">!</i>}</b>
+                        {unverified.has(id) && !shrug && <i className="grid h-3.5 w-3.5 place-items-center rounded-full bg-warning text-[9px] font-bold not-italic text-white" title="No prerequisite data found — confirm with an advisor">!</i>}</b>
                       <span className="card-name">{c?.name}</span>
                     </div>
                     <em className="text-[12px] not-italic text-ink-3 tabular-nums">{c?.credits}</em>
                     {(col.proposed || col.queued) && <button title="Remove" aria-label={`Remove ${c?.code}`} onClick={e => { e.stopPropagation(); (col.queued ? unqueue : remove)(id); }}
                       className={`${icon} absolute -top-2.5 -right-2.5 h-5 w-5 border border-line bg-canvas text-[12px] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-danger`}>×</button>}
+                    {tone && <button title="Ignore prerequisite warning" aria-label={`Ignore prerequisite warning for ${c?.code}`} onClick={e => { e.stopPropagation(); ignore(id); }}
+                      className={`${icon} absolute -top-2.5 -left-2.5 h-5 w-5 border border-line bg-canvas text-[10px] font-semibold opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink`}>ok</button>}
                   </motion.div>;
                 }))}
               </AnimatePresence>
