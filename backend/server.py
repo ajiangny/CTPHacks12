@@ -6,21 +6,26 @@ POST /api/suggest  {"program": "CSCI-BS", "terms": [[courseId...]...], "term": "
                     "pins": [courseId...], "queue": [courseId...], "preferences": {"preferredSubjects": [],
                     "avoidedSubjects": []}, "fresh": bool}
   -> {"suggested": [{"id","reason","unlocks":[ids]}], "candidates": [...same...], "progress": {...}, "source": "gemini"|"heuristic"}
+POST /api/chat     {"program", "terms", "term", "messages": [{"role","text"}]} -> {"reply", "source"}   advisor chatbot
 
 The eligible set is computed here (prereqs met, not taken, offered that term, still needed by the major or
 Pathways). Pinned/queued courses that are eligible are locked into the term first; Gemini then chooses the rest from
 the eligible set, and its picks go through the same guards as the rule-based picker (credit cap, subject cap, coreq
 partner, one course per Pathways slot). Responses are cached per input; "fresh" bypasses the cache (Regenerate).
 """
-import csv, json, os, re, urllib.request
+import csv, json, os, re, urllib.error, urllib.request
 from collections import Counter
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+for _l in (ROOT / ".env").read_text().splitlines() if (ROOT / ".env").exists() else []:   # ponytail: KEY=value lines, no quoting rules
+    if "=" in _l and not _l.startswith("#"):
+        os.environ.setdefault(_l.split("=", 1)[0].strip(), _l.split("=", 1)[1].strip())
 DATA = ROOT.parent / "frontend" / "public" / "data"
-MODEL = "gemini-3.6-flash"
+MODEL = "gemini-3.7-flash"
+FALLBACK = "gemini-3.6-flash"   # ponytail: used only when 3.7 answers 503 (overloaded)
 TARGET_CREDITS, MAX_CREDITS, MIN_COURSES = 15, 20, 5   # aim for ~15 cr and >=5 courses, never above 20 cr
 
 courses = {c["id"]: c for c in json.loads((DATA / "courses.json").read_text(encoding="utf8"))}
@@ -779,12 +784,8 @@ Intensive course: fill each Pathways or Writing Intensive slot with the lowest-l
 
 ELIGIBLE (id | course | credits | why it is needed | meeting time | what it unlocks):
 """ + "\n".join(lines)
-    body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseMimeType": "application/json", "temperature": 0.4}}
-    req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={key}",
-                                 data=json.dumps(body).encode(), headers={"content-type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            chosen = json.loads(json.load(r)["candidates"][0]["content"]["parts"][0]["text"])["courses"]
+        chosen = json.loads(gemini([{"parts": [{"text": prompt}]}], json_out=True))["courses"]
     except Exception as e:                                      # ponytail: any Gemini failure -> heuristic
         print("gemini failed:", e)
         return None
@@ -848,6 +849,68 @@ def suggest(body):
     return out
 
 
+def gemini(contents, system=None, json_out=False, temperature=0.4, model=MODEL):
+    """One generateContent call; returns the text or raises. `contents` is the Gemini turn list."""
+    body = {"contents": contents, "generationConfig": {"temperature": temperature, **({"responseMimeType": "application/json"} if json_out else {})}}
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
+    req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={os.environ['GEMINI_API_KEY']}",
+                                 data=json.dumps(body).encode(), headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+    except urllib.error.HTTPError as e:
+        if e.code == 503 and model != FALLBACK:
+            print(f"{model} overloaded, falling back to {FALLBACK}", flush=True)
+            return gemini(contents, system, json_out, temperature, FALLBACK)
+        raise
+
+
+def chat_context(program, terms, term):
+    """What the advisor bot knows about this student: plan so far, progress, and what is eligible next term."""
+    times = Counter(i for t in terms for i in t)
+    cands, progress = candidates(program, times, term)
+    plan = "\n".join(f"Term {n}: " + (", ".join(f'{courses[i]["code"]}' for i in t if i in courses) or "(empty)") for n, t in enumerate(terms, 1)) or "(nothing approved yet)"
+    major = "\n".join(f'- {m["name"]}: {m["have"]}/{m["need"]} {m["unit"]}' + (f'; still missing e.g. ' + ", ".join(courses[o[0]]["code"] for o in m["missing"][:4] if o and o[0] in courses) if m["missing"] else "")
+                      for m in progress["major"])
+    pathways = ", ".join(f'{p["label"]}: {courses[p["course"]]["code"] if p["course"] else "open"}' for p in progress["pathways"])
+    elig = "\n".join(f'- {courses[c["id"]]["code"]} {courses[c["id"]]["name"]} ({courses[c["id"]]["credits"]} cr) - {c["reason"]}' for c in cands[:40])
+    return f"""You are a friendly, concise academic advisor chatbot inside the Queens College Degree Planner app.
+The student is in the {program['name']} ({program['degree']}) program with {progress['credits']} approved credits.
+Answer only from the facts below plus general advising sense; if asked about a course not listed, say you can't verify it and suggest
+they add it in the planner (it will flag missing prerequisites). Keep replies short (a few sentences or a short list). Never invent
+course codes, credits, or prerequisites.
+
+APPROVED PLAN:
+{plan}
+
+MAJOR PROGRESS:
+{major}
+
+PATHWAYS: {pathways}
+
+ELIGIBLE NEXT {term.upper()} (code name (credits) - why it is needed):
+{elig}"""
+
+
+def chat(body):
+    """POST /api/chat {"program", "terms", "term", "messages": [{"role": "user"|"model", "text"}]} -> {"reply", "source"}"""
+    program = programs[body["program"]]
+    msgs = [m for m in body.get("messages", []) if isinstance(m, dict) and m.get("role") in ("user", "model") and str(m.get("text", "")).strip()][-20:]
+    if not msgs or msgs[-1]["role"] != "user":
+        return {"error": "last message must be from the user"}
+    if not os.environ.get("GEMINI_API_KEY"):
+        return {"reply": "The advisor chat needs GEMINI_API_KEY set on the server.", "source": "none"}
+    system = chat_context(program, body.get("terms") or [], body.get("term", "Fall"))
+    contents = [{"role": m["role"], "parts": [{"text": str(m["text"])[:4000]}]} for m in msgs]
+    try:
+        return {"reply": gemini(contents, system=system, temperature=0.6), "source": "gemini"}
+    except Exception as e:                                      # ponytail: surface the failure, no retry
+        detail = f"HTTP {e.code}: {e.read()[:200].decode(errors='replace')}" if isinstance(e, urllib.error.HTTPError) else str(e)
+        print("gemini chat failed:", detail, flush=True)
+        return {"reply": f"Sorry, the advisor is unavailable right now ({detail}).", "source": "error"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, obj, status=200):
         data = json.dumps(obj).encode()
@@ -885,6 +948,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(raw or b"{}")
         if self.path == "/api/suggest" and body.get("program") in programs:
             return self._send(suggest(body))
+        if self.path == "/api/chat" and body.get("program") in programs:
+            return self._send(chat(body))
         self._send({"error": "bad request"}, 400)
 
 
