@@ -377,6 +377,9 @@ export default function App() {
   }).join(' · ')}.` : '')
     || (violations.size ? `Prerequisite problems in approved terms: ${[...violations.values()].map(v => `${courses.get(v.id)?.code} needs ${v.missing.map(m => courses.get(m)?.code).join(' or ')} first`).join(' · ')}. Use "Undo" or "Start over".` : '');
   const warn = rawWarn === dismissedWarn ? '' : rawWarn;
+  /** Every red/yellow card on the board: blocked proposals, approved-term violations, and unverified-prereq courses. */
+  const flagged = [...new Set([...blocked.map(p => p.id), ...violations.keys(), ...[...unverified].filter(id => !ignored.includes(id))])];
+  const ignoreAll = () => setIgnored([...new Set([...ignored, ...flagged])]);
   const dismissWarn = () => {
     if (rawWarn === notice) setNotice('');
     else if (rawWarn === error) setError('');
@@ -435,6 +438,12 @@ export default function App() {
             <motion.div key="warn" role="alert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={T.base}
               className="flex shrink-0 items-center gap-3 border-b border-line bg-warning-soft px-4 py-2 text-[13px] text-warning">
               <p className="min-w-0 flex-1">{warn}</p>
+              {warn !== error && warn !== notice && flagged.length > 0 && (
+                <button type="button" className={`h-6 shrink-0 rounded-md border border-warning/30 px-2 text-[12px] font-semibold text-warning transition hover:bg-warning/10 ${ring}`}
+                  onClick={ignoreAll} title="Clear every red and yellow prerequisite flag and allow approval">
+                  Ignore all ({flagged.length})
+                </button>
+              )}
               <button type="button" className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border border-warning/30 text-[12px] font-semibold leading-none text-warning transition hover:bg-warning/10 ${ring}`}
                 onClick={dismissWarn} aria-label="Dismiss message" title="Dismiss message">
                 X
