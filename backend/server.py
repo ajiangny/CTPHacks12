@@ -6,7 +6,8 @@ POST /api/suggest  {"program": "CSCI-BS", "terms": [[courseId...]...], "term": "
                     "pins": [courseId...], "queue": [courseId...], "preferences": {"preferredSubjects": [],
                     "avoidedSubjects": []}, "fresh": bool}
   -> {"suggested": [{"id","reason","unlocks":[ids]}], "candidates": [...same...], "progress": {...}, "source": "gemini"|"heuristic"}
-POST /api/chat     {"program", "terms", "term", "messages": [{"role","text"}]} -> {"reply", "source"}   advisor chatbot
+POST /api/chat     {"program", "terms", "term", "messages": [{"role","text"}]} -> {"reply", "source", "track"}   advisor chatbot
+                   ("fastest track" questions also return track: [{"term", "courses": [ids]}] built from the approved terms)
 
 The eligible set is computed here (prereqs met, not taken, offered that term, still needed by the major or
 Pathways). Pinned/queued courses that are eligible are locked into the term first; Gemini then chooses the rest from
@@ -893,6 +894,32 @@ ELIGIBLE NEXT {term.upper()} (code name (credits) - why it is needed):
 {elig}"""
 
 
+FAST_TRACK_RE = re.compile(r"fast(est)?[ -]?track|quick(est)?|shortest|soonest|fewest (terms|semesters)|graduate (early|fast|sooner|asap)|finish (early|fast|sooner|asap)|whole plan|full plan|entire plan|rest of my (plan|degree)", re.I)
+MAX_TRACK_TERMS = 12
+
+
+def fast_track(program, terms, term):
+    """Rule-based path from the approved `terms` to a finished major: one filled term after another (Fall/Spring only)
+    until every major rule is met, nothing is eligible, or MAX_TRACK_TERMS. Returns [{"term", "courses": [ids]}]."""
+    taken, out = Counter(i for t in terms for i in t), []
+    for _ in range(MAX_TRACK_TERMS):
+        cands, progress = candidates(program, taken, term)
+        if all(m["have"] >= m["need"] for m in progress["major"]):
+            break
+        picked = pick(cands, set(taken))
+        if not picked:
+            break
+        out.append({"term": term, "courses": [c["id"] for c in picked]})
+        taken.update(c["id"] for c in picked)
+        term = "Spring" if term == "Fall" else "Fall"
+    return out
+
+
+def track_text(track, done):
+    lines = [f'{n}. {t["term"]}: ' + ", ".join(f'{courses[i]["code"]} ({courses[i]["credits"]} cr)' for i in t["courses"]) for n, t in enumerate(track, 1)]
+    return "\n".join(lines) + ("\n(major requirements complete after this)" if done else "\n(stops here: nothing further is eligible or the cap was reached; Pathways/free electives may remain)")
+
+
 def chat(body):
     """POST /api/chat {"program", "terms", "term", "messages": [{"role": "user"|"model", "text"}]} -> {"reply", "source"}"""
     program = programs[body["program"]]
@@ -901,10 +928,18 @@ def chat(body):
         return {"error": "last message must be from the user"}
     if not os.environ.get("GEMINI_API_KEY"):
         return {"reply": "The advisor chat needs GEMINI_API_KEY set on the server.", "source": "none"}
-    system = chat_context(program, body.get("terms") or [], body.get("term", "Fall"))
+    terms, term = body.get("terms") or [], body.get("term", "Fall")
+    system = chat_context(program, terms, term)
+    track = None
+    if FAST_TRACK_RE.search(msgs[-1]["text"]):              # ponytail: keyword intent; a Gemini classifier if it misfires
+        track = fast_track(program, terms, term)
+        done = not track or all(m["have"] >= m["need"] for m in candidates(program, Counter(i for t in terms + [x["courses"] for x in track] for i in t), term)[1]["major"])
+        system += (f"\n\nFASTEST TRACK (computed by the planner from the {len(terms)} approved term(s); "
+                   "the student asked for this - present EVERY term below verbatim as a numbered list, then one or two sentences of advice):\n"
+                   + (track_text(track, done) if track else "(nothing to add: the major requirements are already met by the approved terms)"))
     contents = [{"role": m["role"], "parts": [{"text": str(m["text"])[:4000]}]} for m in msgs]
     try:
-        return {"reply": gemini(contents, system=system, temperature=0.6), "source": "gemini"}
+        return {"reply": gemini(contents, system=system, temperature=0.6), "source": "gemini", "track": track}
     except Exception as e:                                      # ponytail: surface the failure, no retry
         detail = f"HTTP {e.code}: {e.read()[:200].decode(errors='replace')}" if isinstance(e, urllib.error.HTTPError) else str(e)
         print("gemini chat failed:", detail, flush=True)

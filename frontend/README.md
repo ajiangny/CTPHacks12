@@ -1,32 +1,22 @@
-# React + TypeScript + Vite
+# Degree Planner — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + TypeScript + Vite + Tailwind 4 + `motion`. See the [root README](../README.md) for the whole project and
+[MASTER.md](../MASTER.md) for the design system (every colour/motion token lives in `src/App.css` and `src/App.tsx`).
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+npm install
+npm run dev       # http://localhost:5173 — proxies /api to the Python server on :8000 (vite.config.ts)
+npm run build     # tsc -b && vite build -> dist/
+npm run lint      # oxlint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+| file | what |
+|---|---|
+| `src/App.tsx` | the whole planner: header, plan panel, prerequisite DAG, requirements panel, `/api/suggest` + `/api/audit` calls |
+| `src/Chat.tsx` | **Advisor** chatbot panel (header button) — posts the approved terms + conversation to `/api/chat` (Gemini); ask for the "fastest track" to get a full semester-by-semester plan |
+| `src/plan.ts` | diagram geometry and `nextTerm()` |
+| `src/types.ts` | shared API/data types |
+| `public/data/*.json` | catalog, prerequisites, sections scraped by `backend/*.py` (committed; refresh once a term) |
+
+State that survives reloads is in `localStorage` (`program`, `terms:<program>`, `pins:`, `queue:`, `ui:left`, `ui:right`, …).
+Chat history is not persisted.
