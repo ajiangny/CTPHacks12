@@ -212,3 +212,10 @@ cont = s.fast_track(s.programs["CSCI-BS"], [first], "Spring")
 assert cont[0]["term"] == "Spring" and not set(first) & {i for t in cont for i in t["courses"]}, "continues after approved term"
 assert s.FAST_TRACK_RE.search("what's the fastest track to graduate?") and not s.FAST_TRACK_RE.search("what is CSCI 111?")
 print("fastest track OK")
+
+# ai:false must never reach Gemini even with a key set (the automatic request after Approve)
+os.environ["GEMINI_API_KEY"] = "fake"
+s.gemini_order = lambda *a, **k: (_ for _ in ()).throw(AssertionError("Gemini called with ai:false"))
+assert s.suggest({"program": "CSCI-BS", "terms": [], "term": "Fall", "ai": False, "fresh": True})["source"] == "heuristic"
+os.environ.pop("GEMINI_API_KEY")
+print("ai gate OK")

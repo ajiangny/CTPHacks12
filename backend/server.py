@@ -4,7 +4,7 @@
 
 POST /api/suggest  {"program": "CSCI-BS", "terms": [[courseId...]...], "term": "Fall"|"Spring"|"Summer"|"Winter",
                     "pins": [courseId...], "queue": [courseId...], "preferences": {"preferredSubjects": [],
-                    "avoidedSubjects": []}, "fresh": bool}
+                    "avoidedSubjects": []}, "fresh": bool, "ai": bool (default true; false = rule-based, no Gemini call)}
   -> {"suggested": [{"id","reason","unlocks":[ids]}], "candidates": [...same...], "progress": {...}, "source": "gemini"|"heuristic"}
 POST /api/chat     {"program", "terms", "term", "messages": [{"role","text"}]} -> {"reply", "source", "track"}   advisor chatbot
                    ("fastest track" questions also return track: [{"term", "courses": [ids]}] built from the approved terms)
@@ -829,13 +829,14 @@ def suggest(body):
     cands, progress = candidates(program, times, term, avail, preferences, audit_requirements)
     valid = {c["id"]: c for c in cands}
     locked = [valid[i] for i in dict.fromkeys(body.get("pins", []) + body.get("queue", [])) if i in valid]
-    key = (body["program"], tuple(tuple(t) for t in terms), term, tuple(c["id"] for c in locked),
+    ai = bool(body.get("ai", True))                              # ai=false: rule-based only, never spends Gemini credits
+    key = (body["program"], tuple(tuple(t) for t in terms), term, tuple(c["id"] for c in locked), ai,
            json.dumps(avail, sort_keys=True), tuple(sorted(preferred)), tuple(sorted(avoided)),
            json.dumps(audit_requirements, sort_keys=True))
     if not body.get("fresh") and key in _cache:
         return _cache[key]
     lcr = sum(courses[c["id"]]["credits"] for c in locked)
-    order = None if lcr >= TARGET_CREDITS and len(locked) >= MIN_COURSES else gemini_order(program, term, cands, locked, progress, avail, preferences)
+    order = None if not ai or (lcr >= TARGET_CREDITS and len(locked) >= MIN_COURSES) else gemini_order(program, term, cands, locked, progress, avail, preferences)
     picked = pick(cands, taken, locked, order or ())
     base = taken | {c["id"] for c in picked}
     for c in cands:                                    # recompute against the chosen term (candidates() used taken only)
