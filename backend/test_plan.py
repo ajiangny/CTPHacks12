@@ -1,8 +1,8 @@
 """Self-check for the planner: python backend/test_plan.py"""
 import os
 from pathlib import Path
-os.environ.pop("GEMINI_API_KEY", None)          # deterministic: rule-based picker only
 import server as s
+os.environ.pop("GEMINI_API_KEY", None)          # deterministic: rule-based picker only (after import: server loads .env)
 
 by_code = s.by_code
 cs = lambda *codes: [by_code[c] for c in codes]
@@ -188,3 +188,13 @@ if s.sections:
     print("schedules + availability OK")
 else:
     print("schedules SKIPPED (run: python backend/sections.py)")
+
+# advisor chat: builds the student context and degrades cleanly without a key (never calls Gemini here)
+os.environ.pop("GEMINI_API_KEY", None)
+ctx = s.chat_context(s.programs["CSCI-BS"], [[s.by_code["CSCI 111"], s.by_code["ENGL 110"]]], "Spring")
+assert "CSCI 111" in ctx and "APPROVED PLAN" in ctx and "ELIGIBLE NEXT SPRING" in ctx, ctx[:300]
+assert "CSCI 211" in ctx or "CSCI 212" in ctx, "CSCI 111 should unlock 211/212 in the eligible list"
+r = s.chat({"program": "CSCI-BS", "terms": [], "term": "Fall", "messages": [{"role": "user", "text": "hi"}]})
+assert r["source"] == "none" and "GEMINI_API_KEY" in r["reply"], r
+assert "error" in s.chat({"program": "CSCI-BS", "terms": [], "messages": [{"role": "model", "text": "x"}]})
+print("advisor chat OK")

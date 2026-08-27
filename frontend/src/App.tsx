@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Chat } from './Chat';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import type { AuditImport, AuditRequirement, Availability, Course, Prereqs, Program, Section, SuggestResponse, Suggestion, Term } from './types';
 import { COLS, DEGREE_CREDITS, GEOM, bandH, nextTerm, pos } from './plan';
@@ -81,6 +82,7 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [left, setLeft] = useState<boolean>(() => store('ui:left') ?? true);
   const [right, setRight] = useState<boolean>(() => store('ui:right') ?? true);
+  const [chat, setChat] = useState(false);                          // advisor chatbot (Gemini) open
   const [view, setView] = useState({ x: 0, y: 0, s: 1 });          // diagram pan/zoom
   const auditInput = useRef<HTMLInputElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
@@ -430,6 +432,7 @@ export default function App() {
             </div>
             <span className="font-medium tabular-nums">{totalCredits} <span className="text-ink-3">/ {DEGREE_CREDITS}</span></span>
           </div>
+          <button className={`${btn} ${chat ? 'bg-surface-hover' : ''}`} onClick={() => setChat(v => !v)} aria-pressed={chat} title="Ask the Gemini advisor about your plan">Advisor</button>
           <button className={`${icon} ${right ? 'text-ink' : ''}`} onClick={() => setRight(v => !v)} aria-pressed={right} aria-label="Toggle requirements panel" title="Toggle requirements panel (Ctrl+])"><PanelIcon side="right" /></button>
         </header>
 
@@ -452,7 +455,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <main className="flex min-h-0 flex-1">
+        <main className="relative flex min-h-0 flex-1">
           {/* ---------- LEFT: approval ---------- */}
           <AnimatePresence initial={false} mode="popLayout">
             {left && (
@@ -830,6 +833,7 @@ export default function App() {
               </motion.aside>
             )}
           </AnimatePresence>
+          <AnimatePresence>{chat && <Chat program={pid} terms={terms} term={current.kind} onClose={() => setChat(false)} />}</AnimatePresence>
         </main>
       </div>
     </MotionConfig>

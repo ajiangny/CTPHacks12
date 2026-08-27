@@ -8,7 +8,7 @@ layered DAG with prerequisite edges.
 python backend/scrape.py        # once: programs + courses from the QC catalog API -> frontend/public/data/*.json
 python backend/prereqs.py       # once: prereq edges from the CUNYfirst requirement groups + catalog text
 python backend/sections.py      # once: real class sections (days/times/instructor/status) from CUNYfirst class search
-python backend/server.py        # suggestion API on :8000   (set GEMINI_API_KEY for AI-picked semesters; otherwise rule-based)
+python backend/server.py        # suggestion + advisor-chat API on :8000   (set GEMINI_API_KEY for Gemini 3.7 picks + chat; otherwise rule-based, chat off)
 cd frontend && npm install && npm run dev      # http://localhost:5173  (proxies /api to :8000)
 python backend/test_plan.py     # self-check of the planning logic
 ```
@@ -31,7 +31,9 @@ CSCI 111 at 15–20 credits → **Approve** → Spring 1 should suggest CSCI 211
 course whose prereqs aren't met and confirm it turns red and blocks Approve.
 
 Optional: `set GEMINI_API_KEY=...` (Windows) / `export GEMINI_API_KEY=...` before step 2 for AI-ordered
-semesters; without it the rule-based picker is used and the response shows `"source": "heuristic"`.
+semesters and the **Advisor** chatbot (header button; `POST /api/chat`, model `gemini-3.7-flash`, grounded in the approved plan,
+major progress and the eligible list for the next term). Without a key the rule-based picker is used, the response shows
+`"source": "heuristic"`, and the chat replies that the key is missing. Never commit the key.
 `test_plan.py` always runs rule-based.
 
 Refresh `sections.json` once a term, when the registrar publishes the next schedule (`sections_meta.json`
