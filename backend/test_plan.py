@@ -91,6 +91,11 @@ if s.sections:
     rotating = [c for c in cs("CSCI 310", "CSCI 335", "CSCI 365", "CSCI 383") if c not in everywhere]
     assert all(s.offered(c, "Fall") for c in rotating), [s.courses[c]["code"] for c in rotating]
 
+    # a season we scraped NO term for (Winter: the class search does not serve one) must fall back to the prose
+    # entirely -- the "runs in another season" inference is only valid for a season we actually looked at.
+    assert not s.SEASON.get("Winter")
+    assert sum(1 for c in s.courses if s.offered(c, "Winter")) == sum(1 for c in s.courses if s.offered_text(c, "Winter"))
+
     # a section that clashes with a busy block does not fit; one with no meeting time always does
     secs = [x for x in s.sections_for(by_code["CSCI 111"], "Fall") if x["start"] is not None]
     assert secs, "CSCI 111 has no timed Fall section"

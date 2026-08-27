@@ -192,6 +192,8 @@ def offered(cid, term):
     them, because electives rotate across years. Treating "no section" as "not offered" would delete a third
     of the major's elective list. What we CAN say confidently is the narrower claim below.
     """
+    if not SEASON.get(term):
+        return offered_text(cid, term)   # we scraped no term for this season (Winter): sections can say nothing
     if sections_for(cid, term):
         return True
     if any(cid in sections.get(t, {}) for t in sections):
